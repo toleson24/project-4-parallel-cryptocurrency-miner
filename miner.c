@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
     printf("Number of threads: %d\n", num_threads);
 
     int difficulty = atoi(argv[2]);
-    printf("", difficulty);
+    //printf("", difficulty);
 
 
     // TODO we have hard coded the difficulty to 20 bits (0x0000FFF). This is a
