@@ -41,9 +41,6 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t condp = PTHREAD_COND_INITIALIZER;
 pthread_cond_t condc = PTHREAD_COND_INITIALIZER;
 double condition = 0;
-//double condition[2] = { 0 };
-// double cond_start = 0;
-double cond_end = 0;
 uint64_t global_nonce = 0;
 char *global_bitcoin_block_data;
 uint32_t global_difficulty_mask;
@@ -105,39 +102,29 @@ void *producer_thread(void *ptr) {
     while (true) {
         // add to buffer (i.e. shared memory)
         pthread_mutex_lock(&mutex);
+        printf("producer\n");
+        if (global_nonce != 0) {
+            //break;
+            pthread_exit(0);
+        }
         while (condition != 0) {
             pthread_cond_wait(&condp, &mutex);
         }
         // produce
         i += 100;
         condition = i;
-        /* using array of two values
-         condition[0] = i + 1;
-         i += 100;
-         condition[1] = i;
-        */
-        /* using start & end condition variables
-         cond_start = i + 1;
-         i += 100;
-         cond_end = i;
-        */
         pthread_cond_signal(&condc);
-        pthread_mutex_unlock(&mutex);
-        
+        pthread_mutex_unlock(&mutex);  
     }
     return 0;
 }
 
-// does this function need parameters?
-// or is are bitcoin_block_data, difficulty_mask,
-// and digest in the shared register/memory?
-//
-// also, is it more efficient using two condition variables?
 void *consumer_thread(void *ptr) { 
     while (true) {
         int local;
         // remove from buffer (i.e. shared memory)
         pthread_mutex_lock(&mutex);
+        printf("consumer\n");
         while (condition = 0) {//} && ) {
             pthread_cond_wait(&condc, &mutex);
         }
@@ -148,15 +135,17 @@ void *consumer_thread(void *ptr) {
                 global_bitcoin_block_data,
                 global_difficulty_mask,
                 local, local + 100,
-                global_digest
+                &global_digest
                 ) != 0) {
-                    return global_nonce; // is this the right logic??
+                    //return global_nonce; // is this the right logic??
+                    //break;
+                    pthread_exit(0);
         }
         condition = 0;
         pthread_cond_signal(&condp);
         pthread_mutex_unlock(&mutex);
-        return 0;
     }
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -167,14 +156,13 @@ int main(int argc, char *argv[]) {
     }
 
     int num_threads = atoi(argv[1]);
+    if (num_threads < 1) {
+        num_threads = 1;
+    }
     printf("Number of threads: %d\n", num_threads);
 
     int difficulty = atoi(argv[2]);
     printf("Number of leading 0s: %d\n", difficulty);
-
-    // TODO we have hard coded the difficulty to 20 bits (0x0000FFF). This is a
-    // fairly quick computation -- something like 28 will take much longer.  You
-    // should allow the user to specify anywhere between 1 and 32 bits of zeros.
 
     //uint32_t difficulty_mask = 0x00000FFF; // 4095
     //difficulty_mask = 4095; // exactly the same as above
@@ -198,7 +186,7 @@ int main(int argc, char *argv[]) {
     double start_time = get_time();
 
     uint8_t digest[SHA1_HASH_SIZE];
-    global_digest = digest;
+    global_digest = *digest;
 
     /* Mine the block. */
     /*uint64_t nonce = mine(
@@ -209,10 +197,9 @@ int main(int argc, char *argv[]) {
     */
 
     /*----------------------------------------------------------------*/
-    //pthread_mutex_init(&mutex, NULL); // already initialized in global declaration
-    pthread_t prod;
+    pthread_t prod;                                                     // = NULL; // ??
     pthread_create(&prod, NULL, producer_thread, NULL);
-    pthread_t consumers[num_threads];
+    pthread_t consumers[num_threads];                                   // = { NULL }; // ??
     for (int i = 0; i < num_threads; ++i) {
         pthread_create(&consumers[i], NULL, consumer_thread, NULL);
     }
@@ -220,6 +207,8 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < num_threads; ++i) {
         pthread_join(consumers[i], NULL);
     }
+    pthread_cond_destroy(&condp);
+    pthread_cond_destroy(&condc);
     pthread_mutex_destroy(&mutex);
     /*----------------------------------------------------------------*/
 
