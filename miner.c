@@ -37,6 +37,17 @@
 #include "sha1.h"
 
 unsigned long long total_inversions;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t condp = PTHREAD_COND_INITIALIZER;
+pthread_cond_t condc = PTHREAD_COND_INITIALIZER;
+double condition = 0;
+//double condition[2] = { 0 };
+// double cond_start = 0;
+double cond_end = 0;
+uint64_t global_nonce = 0;
+char *global_bitcoin_block_data;
+uint32_t global_difficulty_mask;
+uint8_t global_digest;
 
 double get_time()
 {
@@ -89,6 +100,65 @@ uint64_t mine(char *data_block, uint32_t difficulty_mask,
     return 0;
 }
 
+void *producer_thread(void *ptr) {
+    int i = 1;
+    while (true) {
+        // add to buffer (i.e. shared memory)
+        pthread_mutex_lock(&mutex);
+        while (condition != 0) {
+            pthread_cond_wait(&condp, &mutex);
+        }
+        // produce
+        i += 100;
+        condition = i;
+        /* using array of two values
+         condition[0] = i + 1;
+         i += 100;
+         condition[1] = i;
+        */
+        /* using start & end condition variables
+         cond_start = i + 1;
+         i += 100;
+         cond_end = i;
+        */
+        pthread_cond_signal(&condc);
+        pthread_mutex_unlock(&mutex);
+        
+    }
+    return 0;
+}
+
+// does this function need parameters?
+// or is are bitcoin_block_data, difficulty_mask,
+// and digest in the shared register/memory?
+//
+// also, is it more efficient using two condition variables?
+void *consumer_thread(void *ptr) { 
+    while (true) {
+        int local;
+        // remove from buffer (i.e. shared memory)
+        pthread_mutex_lock(&mutex);
+        while (condition = 0) {//} && ) {
+            pthread_cond_wait(&condc, &mutex);
+        }
+        local = condition;
+        // consume
+        //uint64_t nonce = mine(
+        if (global_nonce = mine(
+                global_bitcoin_block_data,
+                global_difficulty_mask,
+                local, local + 100,
+                global_digest
+                ) != 0) {
+                    return global_nonce; // is this the right logic??
+        }
+        condition = 0;
+        pthread_cond_signal(&condp);
+        pthread_mutex_unlock(&mutex);
+        return 0;
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc != 4) {
@@ -96,25 +166,23 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    int num_threads = atoi(argv[1]); // TODO
+    int num_threads = atoi(argv[1]);
     printf("Number of threads: %d\n", num_threads);
 
     int difficulty = atoi(argv[2]);
-    //printf("", difficulty);
-
+    printf("Number of leading 0s: %d\n", difficulty);
 
     // TODO we have hard coded the difficulty to 20 bits (0x0000FFF). This is a
     // fairly quick computation -- something like 28 will take much longer.  You
     // should allow the user to specify anywhere between 1 and 32 bits of zeros.
+
     //uint32_t difficulty_mask = 0x00000FFF; // 4095
     //difficulty_mask = 4095; // exactly the same as above
-
     uint32_t difficulty_mask = 0x0;
-    //int num_ones = 32 - difficulty;
     for (int i = 0; i < 32 - difficulty; ++i) {
         difficulty_mask = difficulty_mask | 1 << i;
     }
-
+    global_difficulty_mask = difficulty_mask;
     printf("  Difficulty Mask: ");
     print_binary32(difficulty_mask);
 
@@ -122,6 +190,7 @@ int main(int argc, char *argv[]) {
      * complete bitcoin miner implementation, the block data would be composed
      * of bitcoin transactions. */
     char *bitcoin_block_data = argv[3];
+    strncpy(global_bitcoin_block_data, bitcoin_block_data, strlen(bitcoin_block_data)); // more efficient to skip this step entirely : make bitcoin_block_data a global char * ?
     printf("       Block data: [%s]\n", bitcoin_block_data);
 
     printf("\n----------- Starting up miner threads!  -----------\n\n");
@@ -129,17 +198,35 @@ int main(int argc, char *argv[]) {
     double start_time = get_time();
 
     uint8_t digest[SHA1_HASH_SIZE];
+    global_digest = digest;
 
     /* Mine the block. */
-    uint64_t nonce = mine(
+    /*uint64_t nonce = mine(
             bitcoin_block_data,
             difficulty_mask,
             1, UINT64_MAX,
             digest);
+    */
+
+    /*----------------------------------------------------------------*/
+    //pthread_mutex_init(&mutex, NULL); // already initialized in global declaration
+    pthread_t prod;
+    pthread_create(&prod, NULL, producer_thread, NULL);
+    pthread_t consumers[num_threads];
+    for (int i = 0; i < num_threads; ++i) {
+        pthread_create(&consumers[i], NULL, consumer_thread, NULL);
+    }
+    pthread_join(prod, NULL);
+    for (int i = 0; i < num_threads; ++i) {
+        pthread_join(consumers[i], NULL);
+    }
+    pthread_mutex_destroy(&mutex);
+    /*----------------------------------------------------------------*/
 
     double end_time = get_time();
 
-    if (nonce == 0) {
+    //if (nonce == 0) {
+    if (global_nonce == 0) {
         printf("No solution found!\n");
         return 1;
     }
@@ -149,7 +236,8 @@ int main(int argc, char *argv[]) {
     sha1tostring(solution_hash, digest);
 
     printf("Solution found by thread %d:\n", 0);
-    printf("Nonce: %lu\n", nonce);
+    //printf("Nonce: %lu\n", nonce);
+    printf("Nonce: %lu\n", global_nonce);
     printf(" Hash: %s\n", solution_hash);
 
     double total_time = end_time - start_time;
