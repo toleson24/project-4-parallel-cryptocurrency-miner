@@ -128,18 +128,19 @@ void *consumer_thread(void *ptr) {
         while (condition = 0) {//} && ) {
             pthread_cond_wait(&condc, &mutex);
         }
-        local = condition;
+        local = condition; // long int
         // consume
         //uint64_t nonce = mine(
-        if (global_nonce = mine(
+        global_nonce = mine(
                 global_bitcoin_block_data,
                 global_difficulty_mask,
                 local, local + 100,
-                &global_digest
-                ) != 0) {
-                    //return global_nonce; // is this the right logic??
-                    //break;
-                    pthread_exit(0);
+                &global_digest // suggested non global
+        );
+        if (global_nonce != 0) { //nonce != 0 
+            //return global_nonce; // is this the right logic??
+            //break;
+            pthread_exit(0);
         }
         condition = 0;
         pthread_cond_signal(&condp);
@@ -177,9 +178,9 @@ int main(int argc, char *argv[]) {
     /* We use the input string passed in (argv[3]) as our block data. In a
      * complete bitcoin miner implementation, the block data would be composed
      * of bitcoin transactions. */
-    char *bitcoin_block_data = argv[3];
-    strncpy(global_bitcoin_block_data, bitcoin_block_data, strlen(bitcoin_block_data)); // more efficient to skip this step entirely : make bitcoin_block_data a global char * ?
-    printf("       Block data: [%s]\n", bitcoin_block_data);
+    char *global_bitcoin_block_data = argv[3];
+    //strncpy(global_bitcoin_block_data, bitcoin_block_data, strlen(bitcoin_block_data)); // more efficient to skip this step entirely : make bitcoin_block_data a global char * ?
+    printf("       Block data: [%s]\n", global_bitcoin_block_data);
 
     printf("\n----------- Starting up miner threads!  -----------\n\n");
 
@@ -200,8 +201,21 @@ int main(int argc, char *argv[]) {
     pthread_t prod;                                                     // = NULL; // ??
     pthread_create(&prod, NULL, producer_thread, NULL);
     pthread_t consumers[num_threads];                                   // = { NULL }; // ??
+    /* create threads using globals */
+    /*for (int i = 0; i < num_threads; ++i) {
+        if (pthread_create(consumers + i, NULL, consumer_thread, NULL) != 0) { // &consumers[i]
+            //perror("thread creating failed");
+            printf("thread %d creating failed", i);
+            return EXIT_FAILURE;
+        }//;
+    }*/
+    /* create threads using struct */
     for (int i = 0; i < num_threads; ++i) {
-        pthread_create(&consumers[i], NULL, consumer_thread, NULL);
+        // dynamically allocate struct
+        // ->dynamically allocate three things
+        pthread_create(consumers + i, NULL, consumer_thread, NULL);
+        // need to free three members
+        // need to free struct
     }
     pthread_join(prod, NULL);
     for (int i = 0; i < num_threads; ++i) {
