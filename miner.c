@@ -43,7 +43,6 @@ pthread_cond_t condc = PTHREAD_COND_INITIALIZER;
 long int condition = 0;
 char *global_bitcoin_block_data;
 uint32_t global_difficulty_mask = 0x0;
-uint8_t *global_digest;
 uint64_t global_nonce = 0;
 /* When printed in hex, a SHA-1 checksum will be 40 characters. */
 char global_solution_hash[41];
@@ -99,28 +98,27 @@ uint64_t mine(char *data_block, uint32_t difficulty_mask,
     return 0;
 }
 
-void *consumer_thread(void *ptr) { 
+void *consumer_thread(void *ptr) {
+    //int *local_id = malloc(sizeof(int));
+    //local_id = *(int *)ptr; 
     while (true) {
         long int local;
         uint8_t digest[SHA1_HASH_SIZE];
         pthread_mutex_lock(&mutex);
-        printf("consumer\n");                                           // debug prints
-        //printf("%d", condition);                                              // not printing
         while (condition == 0 && global_nonce == 0) {
-            //pthread_cond_signal(&condp);
             pthread_cond_wait(&condc, &mutex);
         }
         if (global_nonce != 0) {
             pthread_cond_signal(&condp);
             pthread_mutex_unlock(&mutex);
+            //free(ptr);
             pthread_exit(0);
+            //pthread_exit(local_id);
         }
         local = condition;
         condition = 0;
         pthread_cond_signal(&condp);
         pthread_mutex_unlock(&mutex);
-        printf("working\n");
-        //printf("%p, %d", global_bitcoin_block_data, global_difficulty_mask);  // not printing
         uint64_t nonce = mine(
                 global_bitcoin_block_data,
                 global_difficulty_mask,
@@ -134,10 +132,13 @@ void *consumer_thread(void *ptr) {
             pthread_cond_broadcast(&condc);
             pthread_cond_signal(&condp);
             pthread_mutex_unlock(&mutex);
+            //free(ptr);
             pthread_exit(0);
+            //pthread_exit(local_id); // 0
         }
     }
     return 0;
+    //return local_id; // 0
 }
 
 int main(int argc, char *argv[]) {
@@ -172,30 +173,29 @@ int main(int argc, char *argv[]) {
     /*----------------------------------------------------------------*/
     pthread_t consumers[num_threads];    
     for (int i = 0; i < num_threads; ++i) {
+        //int *thread_id = malloc(sizeof(int));
+        //*thread_id = i;
         pthread_create(consumers + i, NULL, consumer_thread, NULL);
+        //pthread_create(consumers + i, NULL, consumer_thread, thread_id);
     }
-
-    // producer loop
+    /* Producer */
     int start = 1;
     while (true) {
         pthread_mutex_lock(&mutex);
-        printf("producer\n");                                           // debug prints
         while (condition != 0 && global_nonce == 0) {  
             pthread_cond_wait(&condp, &mutex);
         }
-        printf("prod woke up\n");                                       // debug prints
         if (global_nonce != 0) {
             pthread_cond_signal(&condc);
             pthread_mutex_unlock(&mutex); 
-            break;                                                      // use a goto statement?
+            break;
         }
         start += 100;
         condition = start;
         pthread_cond_signal(&condc);
         pthread_mutex_unlock(&mutex);  
     }
-    //printf("joining now");                                                      // not printing
-                                                                        // goto here?
+
     for (int i = 0; i < num_threads; ++i) {
         pthread_join(consumers[i], NULL);
     }
