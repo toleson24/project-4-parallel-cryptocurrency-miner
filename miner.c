@@ -45,6 +45,8 @@ char *global_bitcoin_block_data;
 uint32_t global_difficulty_mask = 0x0;
 uint8_t *global_digest; //[SHA1_HASH_SIZE]; // make pointer & derefrence using in sha1tosum?
 uint64_t global_nonce = 0;
+/* When printed in hex, a SHA-1 checksum will be 40 characters. */
+char global_solution_hash[41];
 
 double get_time()
 {
@@ -100,19 +102,24 @@ uint64_t mine(char *data_block, uint32_t difficulty_mask,
 void *consumer_thread(void *ptr) { 
     while (true) {
         long int local;
-        uint8_t digest[SHA1_HASH_SIZE];
+        uint8_t digest[SHA1_HASH_SIZE];                                 // would putting these outside the while loop be helpful?
 
-        // remove from buffer (i.e. shared memory)
+        // remove from buffer (i.e. shared memory
         pthread_mutex_lock(&mutex);
         printf("consumer\n");                                           // debug prints
         //printf("%d", condition);                                              // not printing
-        if (global_nonce != 0) {
-            pthread_exit(0);
-        }
-        while (condition == 0) {
+        while (condition == 0 && global_nonce != 0) {
             pthread_cond_wait(&condc, &mutex);
         }
+        if (global_nonce != 0) {
+            pthread_cond_signal(&condp);
+            pthread_mutex_unlock(&mutex);
+            pthread_exit(0);
+        }
         local = condition;
+        condition = 0;
+        pthread_cond_signal(&condp);
+        pthread_mutex_unlock(&mutex);
 
         // consume
         //printf("working");
@@ -124,15 +131,15 @@ void *consumer_thread(void *ptr) {
                 digest
         );
         if (nonce != 0) {
+            pthread_mutex_lock(&mutex);
             global_nonce = nonce;
-            global_digest = *digest;
+            //global_digest = *digest;
+            sha1tostring(global_solution_hash, digest);
+            pthread_cond_broadcast(&condc);
             pthread_cond_signal(&condp);
             pthread_mutex_unlock(&mutex);
             pthread_exit(0);
-        }
-        condition = 0;                                                          // breaking my code??
-        pthread_cond_signal(&condp);
-        pthread_mutex_unlock(&mutex);
+        }                                                          // breaking my code??
     }
     return 0;
 }
@@ -146,7 +153,7 @@ int main(int argc, char *argv[]) {
 
     int num_threads = atoi(argv[1]);
     if (num_threads < 1) {
-        num_threads = 1;
+        return EXIT_FAILURE;
     }
     printf("Number of threads: %d\n", num_threads);
 
@@ -184,15 +191,18 @@ int main(int argc, char *argv[]) {
 
     // put the producer loop here; use a loop checking while global_nonce != 0
     int start = 1;
-    while (global_nonce == 0) {
+    while (true) {
         // add to buffer (i.e. shared memory)
         pthread_mutex_lock(&mutex);
         printf("producer\n");                                           // debug prints
-        while (condition != 0) {
-            if (global_nonce != 0) {
-                break;
-            }
+        while (condition != 0 && global_nonce == 0) {  
             pthread_cond_wait(&condp, &mutex);
+        }
+        printf("prod woke up\n");
+        if (global_nonce != 0) {
+            pthread_cond_signal(&condc);
+            pthread_mutex_unlock(&mutex); 
+            break;                                                      // use a goto statement?
         }
         // produce
         start += 100;
@@ -202,7 +212,7 @@ int main(int argc, char *argv[]) {
     }
 
     //printf("joining now");                                                      // not printing
-
+                                                                        // goto here?
     for (int i = 0; i < num_threads; ++i) {
         pthread_join(consumers[i], NULL); // (void **) &digest);
     }
@@ -218,13 +228,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* When printed in hex, a SHA-1 checksum will be 40 characters. */
-    char solution_hash[41];
-    sha1tostring(solution_hash, *global_digest); // dereference global_digest pointer here
+    //sha1tostring(solution_hash, *global_digest); // dereference global_digest pointer here // call in consumer, make solution_hash global
 
     printf("Solution found by thread %d:\n", 0);
     printf("Nonce: %lu\n", global_nonce); 
-    printf(" Hash: %s\n", solution_hash);
+    printf(" Hash: %s\n", global_solution_hash);
 
     double total_time = end_time - start_time;
     printf("%llu hashes in %.2fs (%.2f hashes/sec)\n",
